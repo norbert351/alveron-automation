@@ -1,0 +1,26 @@
+{
+  "name": "alveron-automation",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Alveron Fashion automation: private integration gateway, ledger and n8n workflows. Alveron remains the source of truth; this repository orchestrates around it.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test \"dist/tests/**/*.test.js\"",
+    "test:live": "npm run build && node --test dist/tests/live",
+    "gateway": "node dist/src/gateway/start.js",
+    "verify:env": "node dist/scripts/verify-env.js",
+    "check:connectivity": "node dist/scripts/check-alveron-connectivity.js",
+    "n8n:export": "node scripts/export-workflows.mjs",
+    "n8n:import": "node scripts/import-workflows.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.5",
+    "typescript": "^5.9.3"
+  }
+}

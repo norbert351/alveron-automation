@@ -1,0 +1,38 @@
+# Operator deployment for self-hosted n8n — pinned stable version.
+# Secrets come from deploy/.env (git-ignored). Never commit real values.
+# The automation gateway does NOT run in this compose stack: it stays a private
+# host process (loopback), reachable only by n8n.
+services:
+  n8n:
+    image: n8nio/n8n:2.39.8
+    container_name: alveron-n8n
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5678:5678"   # Nginx (on the host) terminates TLS for n8n.alveronfashion.com
+    env_file:
+      - .env
+    environment:
+      # Set in deploy/.env — never committed. Must stay stable across restarts.
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_HOST=${N8N_HOST}
+      - N8N_PROTOCOL=${N8N_PROTOCOL}
+      - WEBHOOK_URL=${WEBHOOK_URL}
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+      - TZ=${TZ}
+      # Non-secret hardening
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_TEMPLATES_ENABLED=false
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false   # workflows use $env.GATEWAY_BASE_URL (non-secret)
+      - EXECUTIONS_DATA_PRUNE=true
+      - EXECUTIONS_DATA_MAX_AGE=336
+      - EXECUTIONS_DATA_PRUNE_MAX_COUNT=5000
+    volumes:
+      - n8n_data:/home/node/.n8n   # workflows, credentials, execution history, settings
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5678/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  n8n_data:

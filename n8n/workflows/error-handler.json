@@ -1,0 +1,13 @@
+{
+  "name": "Alveron Automation — Error Classification (DEV)",
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "nodes": [
+    { "id": "error", "name": "Error Trigger", "type": "n8n-nodes-base.errorTrigger", "typeVersion": 1, "position": [0,0], "parameters": {} },
+    { "id": "classify", "name": "Sanitized Failure Classification", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [240,0], "parameters": {
+      "jsCode": "// Records a sanitized failure classification and stops. No automatic replay:\n// the gateway owns bounded retries, and replaying blindly could duplicate notifications.\nconst x = $input.first().json;\nconst text = String(x.execution?.error?.message || x.trigger?.error?.message || '');\n// Phase 4 canonical codes plus Phase 5 failure categories.\nconst signals = ['CONFIGURATION_ERROR','AUTHENTICATION_ERROR','AUTHORIZATION_ERROR','RATE_LIMITED','ALVERON_SERVER_ERROR','NETWORK_ERROR','INVALID_RESPONSE','VALIDATION_FAILED','LEDGER_ERROR','AUTHENTICATION_FAILED','ALVERON_API_FAILURE','CONFIG_INVALID','CUSTOMER_EMAIL_MISSING','NOTIFICATION_NOT_SENT','DELIVERY_RECONCILIATION_REQUIRED','LEDGER_FAILURE','GATEWAY_AUTHENTICATION_FAILED'];\nconst transient = ['RATE_LIMITED','ALVERON_SERVER_ERROR','NETWORK_ERROR'];\nconst matched = signals.filter(s => text.includes(s));\nreturn [{ json: { workflow: x.workflow?.name ?? 'unknown', failingNode: x.execution?.lastNodeExecuted ?? 'unknown', matchedSignals: matched, transient: matched.some(s => transient.includes(s)), manualInterventionRequired: true, automaticReplay: false } }];"
+    } }
+  ],
+  "connections": { "Error Trigger": { "main": [[{ "node": "Sanitized Failure Classification", "type": "main", "index": 0 }]] } },
+  "pinData": {}
+}

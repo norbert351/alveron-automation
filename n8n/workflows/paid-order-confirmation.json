@@ -1,0 +1,97 @@
+{
+  "name": "Paid Order — Customer Confirmation & Admin Alert (DEV)",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "all"
+  },
+  "nodes": [
+    {
+      "id": "schedule",
+      "name": "Conservative Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "gateway",
+      "name": "Run Private Gateway",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        0
+      ],
+      "retryOnFail": false,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GATEWAY_BASE_URL + '/internal/workflows/paid-order-confirmation/run' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "fullResponse": true,
+            "neverError": true,
+            "responseFormat": "json"
+          }
+        }
+      }
+    },
+    {
+      "id": "result",
+      "name": "Validate Sanitized Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const r = $input.first().json; const b = r.body; const allowed = ['AUTHENTICATION_FAILED','ALVERON_API_FAILURE','RATE_LIMITED','VALIDATION_FAILED','CUSTOMER_EMAIL_MISSING','NOTIFICATION_NOT_SENT','DELIVERY_RECONCILIATION_REQUIRED','LEDGER_FAILURE','INTERNAL_ERROR']; if (r.statusCode !== 200 || !b || b.status !== 'completed' || b.failed !== 0) { const reasons = Array.isArray(b?.results) ? b.results.map(x => x.reason) : [b?.code]; const safe = [...new Set(reasons.filter(x => allowed.includes(x)))]; throw new Error('GATEWAY_RUN_FAILED:' + (safe.join(',') || 'GATEWAY_UNAVAILABLE')); } if (typeof b.runId !== 'string' || !Number.isInteger(b.processed)) throw new Error('GATEWAY_RUN_FAILED:VALIDATION_FAILED'); return [{json:{runId:b.runId,status:b.status,processed:b.processed,skipped:b.skipped,failed:b.failed}}];"
+      }
+    }
+  ],
+  "connections": {
+    "Conservative Schedule": {
+      "main": [
+        [
+          {
+            "node": "Run Private Gateway",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Private Gateway": {
+      "main": [
+        [
+          {
+            "node": "Validate Sanitized Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}

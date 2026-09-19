@@ -1,0 +1,52 @@
+# Dependencies / build output
+node_modules/
+dist/
+
+# Runtime/verification artifacts (never commit)
+*.out
+*.err
+install.out
+install.err
+mock.out
+mock.err
+gateway.out
+gateway.err
+n8n.out
+n8n.err
+gw1.out
+gw1.err
+gw2.out
+gw2.err
+gw-restart.out
+gw-restart.err
+
+# Local n8n runtime verification (installed + state; never committed)
+.n8n-runtime/
+.n8n-state/
+deploy/.env
+deploy/.env.*
+!deploy/.env.example
+
+# Secrets — never commit
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Ledger / runtime data (contains automation state, not customer data)
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# n8n
+n8n/.n8n/
+*.n8n-backup
+
+# Logs and OS noise
+*.log
+logs/
+.DS_Store
+Thumbs.db

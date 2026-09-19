@@ -1,0 +1,97 @@
+{
+  "name": "Referral Qualification — Scheduled Alveron Trigger (DEV)",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "all"
+  },
+  "nodes": [
+    {
+      "id": "schedule",
+      "name": "Conservative Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "gateway",
+      "name": "Run Private Gateway",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        0
+      ],
+      "retryOnFail": false,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GATEWAY_BASE_URL + '/internal/workflows/referral-qualification/run' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "fullResponse": true,
+            "neverError": true,
+            "responseFormat": "json"
+          }
+        }
+      }
+    },
+    {
+      "id": "result",
+      "name": "Validate Sanitized Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// 'duplicate' is a legitimate no-op for an already-handled window, not a failure.\nconst r = $input.first().json;\nconst b = r.body;\nconst categories = ['CONFIGURATION_ERROR','AUTHENTICATION_ERROR','AUTHORIZATION_ERROR','RATE_LIMITED','ALVERON_SERVER_ERROR','NETWORK_ERROR','INVALID_RESPONSE','VALIDATION_FAILED','LEDGER_ERROR','UNKNOWN_ERROR'];\nif (r.statusCode === 200 && b && (b.status === 'completed' || b.status === 'duplicate')) {\n  return [{ json: { status: b.status, windowId: b.windowId, sideEffectInvoked: b.sideEffectInvoked === true, processedCount: b.processedCount ?? null, duplicate: b.duplicate ?? null } }];\n}\nconst category = categories.includes(b?.failureCategory) ? b.failureCategory : 'UNKNOWN_ERROR';\nthrow new Error('REFERRAL_QUALIFICATION_FAILED:' + category);"
+      }
+    }
+  ],
+  "connections": {
+    "Conservative Schedule": {
+      "main": [
+        [
+          {
+            "node": "Run Private Gateway",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Private Gateway": {
+      "main": [
+        [
+          {
+            "node": "Validate Sanitized Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}
