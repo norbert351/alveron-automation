@@ -73,6 +73,13 @@ test('workflow Code nodes compile and preserve structured failure classification
   assert.equal(gateway['errorCode'], 'ALVERON_API_FAILURE');
   assert.equal(gateway['category'], 'NETWORK_ERROR');
   assert.equal(gateway['transient'], true);
+  // A structured marker must never be clobbered by the raw-message fallback: the category token
+  // "CONFIGURATION_ERROR" contains "configuration", which previously overwrote the real error code.
+  const configuration = run({ workflow: { name: 'Paid Order' }, execution: { id: 'exec-2',
+    error: { message: 'GATEWAY_RUN_FAILED|NOTIFICATION_NOT_SENT|CONFIGURATION_ERROR|false' } } });
+  assert.equal(configuration['errorCode'], 'NOTIFICATION_NOT_SENT');
+  assert.equal(configuration['category'], 'CONFIGURATION_ERROR');
+  assert.equal(configuration['transient'], false);
   const trigger = run({ workflow: {}, trigger: { error: { message: 'ECONNREFUSED' } } });
   assert.equal(String(trigger['executionId']).length > 0, true);
   assert.equal(trigger['category'], 'NETWORK_ERROR');

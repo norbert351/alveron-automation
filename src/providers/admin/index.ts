@@ -234,12 +234,22 @@ export function referralProcessingNotification(windowId: string, stats: Referral
     ], 'Alveron does not report how many individual referrals changed in this run.');
 }
 
-export function automationErrorNotification(input: AutomationErrorNotificationInput): AdminNotification {
+export function automationErrorNotification(
+  input: AutomationErrorNotificationInput,
+  now: () => number = Date.now,
+): AdminNotification {
   if (!errorCategories.has(input.category) || !errorCodes.has(input.errorCode) || typeof input.transient !== 'boolean') fail();
   const workflow = text(input.workflow, 200);
   const executionId = text(input.executionId, 200);
   const heading = input.transient ? '⚠️ AUTOMATION WARNING' : '🚨 AUTOMATION ERROR';
-  const eventHash = createHash('sha256').update(`${executionId}\0${input.errorCode}`).digest('hex');
+  // Aggregate repeated identical failures instead of alerting once per execution. The fingerprint is
+  // stable (workflow + category + error code) so distinct failures stay distinct, while a time bucket
+  // lets an unresolved failure re-surface on a bounded cadence — hourly for transient failures, daily
+  // for permanent ones — so a persistent configuration error cannot flood Telegram every poll.
+  // `executionId` stays the resource id for traceability and is deliberately not part of the key.
+  const bucket = new Date(now()).toISOString().slice(0, input.transient ? 13 : 10);
+  const eventHash = createHash('sha256')
+    .update(`${workflow}\0${input.category}\0${input.errorCode}\0${bucket}`).digest('hex');
   return createNotification('AUTOMATION_ERROR', `automation-error:${eventHash}`, executionId,
     input.transient ? 'WARNING' : 'ERROR', heading, [
       { label: 'Workflow', value: workflow },
