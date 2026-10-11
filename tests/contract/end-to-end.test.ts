@@ -41,7 +41,14 @@ test('MOCK HTTP end-to-end: gateway login, discover, detail, customer + admin, p
       return;
     }
     if (req.headers.authorization !== `Bearer ${token}`) { res.statusCode = 401; res.end('{}'); return; }
-    if (req.method === 'GET' && req.url === '/api/orders') { res.end(JSON.stringify([order])); return; }
+    const requestUrl = req.url ?? '';
+    if (req.method === 'GET' && (requestUrl === '/api/orders' || requestUrl.startsWith('/api/orders?'))) {
+      const url = new URL(requestUrl, 'http://127.0.0.1');
+      const limit = Number(url.searchParams.get('limit') ?? 500) || 500;
+      const offset = Number(url.searchParams.get('offset') ?? 0) || 0;
+      res.end(JSON.stringify([order].slice(offset, offset + limit)));
+      return;
+    }
     if (req.method === 'GET' && req.url === `/api/orders/${orderId}`) { res.end(JSON.stringify({ ...order, events: [] })); return; }
     res.statusCode = 404; res.end('{}');
   });
@@ -71,7 +78,7 @@ test('MOCK HTTP end-to-end: gateway login, discover, detail, customer + admin, p
     assert.ok(notifications.some(line => line.includes('customer_confirmation')));
     assert.ok(notifications.some(line => line.includes('admin_alert')));
     assert.equal(requests.filter(path => path.includes('admin-login')).length, 1);
-    assert.equal(requests.filter(path => path === 'GET /api/orders').length, 2);
+    assert.equal(requests.filter(path => path.startsWith('GET /api/orders?')).length, 2);
     assert.equal(requests.filter(path => path === `GET /api/orders/${orderId}`).length, 2);
     assert.ok(requests.every(path => path.startsWith('GET ') || path === 'POST /api/auth/admin-login'));
     assert.equal(application.ledger.get(`development-console:paid-order-confirmation:${orderId}:customer`)?.status, 'SUCCESS');

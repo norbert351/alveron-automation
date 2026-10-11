@@ -13,11 +13,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test \"dist/tests/**/*.test.js\"",
     "test:live": "npm run build && node --test dist/tests/live",
+    "test:telegram": "npm run build && node dist/scripts/test-telegram.js",
     "gateway": "node dist/src/gateway/start.js",
     "verify:env": "node dist/scripts/verify-env.js",
     "check:connectivity": "node dist/scripts/check-alveron-connectivity.js",
     "n8n:export": "node scripts/export-workflows.mjs",
-    "n8n:import": "node scripts/import-workflows.mjs"
+    "n8n:import": "node scripts/import-workflows.mjs",
+    "validate:workflows": "node scripts/workflow-bindings.mjs n8n/workflows"
   },
   "devDependencies": {
     "@types/node": "^24.13.5",

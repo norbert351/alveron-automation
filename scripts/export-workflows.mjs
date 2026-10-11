@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 const command = process.argv[1]?.endsWith('import-workflows.mjs') ? 'import' : 'export';
 const n8n = spawnSync('n8n', command === 'export'
   ? ['export:workflow', '--all', '--separate', '--pretty', '--output=n8n/workflows']
-  : ['import:workflow', '--separate', `--input=n8n/workflows`],
+  : ['import:workflow', '--separate', '--activeState=false', `--input=n8n/workflows`],
   { stdio: 'inherit', shell: process.platform === 'win32' });
 
 if (n8n.error?.code === 'ENOENT') {

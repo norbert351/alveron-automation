@@ -26,6 +26,10 @@ gw-restart.err
 deploy/.env
 deploy/.env.*
 !deploy/.env.example
+deploy/gateway.env
+deploy/gateway.env.*
+!deploy/gateway.env.example
+deploy/*.backup
 
 # Secrets — never commit
 .env

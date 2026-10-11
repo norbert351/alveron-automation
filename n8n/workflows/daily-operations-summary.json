@@ -1,0 +1,101 @@
+{
+  "name": "ALV - Daily Operations Summary (DEV)",
+  "id": "bL5p2XcVn8Qz4MwT",
+  "active": false,
+  "settings": {
+    "errorWorkflow": "T0o2hhdklxob9bkX",
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "all"
+  },
+  "nodes": [
+    {
+      "id": "schedule",
+      "name": "Conservative Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "gateway",
+      "name": "Run Private Gateway",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        0
+      ],
+      "retryOnFail": false,
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8787/internal/workflows/daily-operations-summary/run",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "result",
+      "name": "Validate Sanitized Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const raw = $input.first().json; const b = raw.body && typeof raw.body === 'object' && !Array.isArray(raw.body) ? raw.body : raw; const codes = ['AUTHENTICATION_FAILED','ALVERON_API_FAILURE','RATE_LIMITED','VALIDATION_FAILED','AUTHORIZATION_ERROR','INVALID_RESPONSE','BUSY']; const httpStatus = Number(raw.statusCode || 0); if (httpStatus !== 200 || b?.status !== 'completed' || typeof b.runId !== 'string' || b.workflow !== 'daily-operations-summary' || typeof b.counts !== 'object' || b.counts === null || typeof b.alveronHealthy !== 'boolean' || typeof b.message !== 'string') { const code = codes.includes(b?.code) ? b.code : (httpStatus === 401 ? 'GATEWAY_AUTHENTICATION_FAILED' : 'GATEWAY_UNAVAILABLE'); throw new Error('GATEWAY_RUN_FAILED|' + code + '|NETWORK_ERROR|true'); } return [{json:{runId:b.runId,workflow:b.workflow,status:b.status,businessDate:b.businessDate,counts:b.counts,alveronHealthy:b.alveronHealthy,notificationStatus:b.notificationStatus,message:b.message}}];"
+      }
+    }
+  ],
+  "connections": {
+    "Conservative Schedule": {
+      "main": [
+        [
+          {
+            "node": "Run Private Gateway",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Private Gateway": {
+      "main": [
+        [
+          {
+            "node": "Validate Sanitized Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}

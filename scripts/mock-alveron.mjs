@@ -55,10 +55,14 @@ const server = createServer(async (req, res) => {
     return res.end(JSON.stringify({ total: 10 + statsCalls, pending: 2, qualified: 3, rewarded: 4, cancelled: 1,
       totalDiscounts: 4000, totalRewards: 2000, totalCreditIssued: 2000, totalCreditRedeemed: 500, conversionRate: 50 }));
   }
-  if (req.url === '/api/orders') {
+  if (req.url === '/api/orders' || req.url.startsWith('/api/orders?')) {
     orderCalls++;
+    const url = new URL(req.url, 'http://127.0.0.1');
+    const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 500) || 500, 1), 1000);
+    const offset = Math.max(Number(url.searchParams.get('offset') ?? 0) || 0, 0);
+    const all = [paidOrder, paidNoEmail, unpaid];
     res.writeHead(200, { 'content-type': 'application/json' });
-    return res.end(JSON.stringify([paidOrder, paidNoEmail, unpaid]));
+    return res.end(JSON.stringify(all.slice(offset, offset + limit)));
   }
   const match = req.url.match(/^\/api\/orders\/([0-9a-f-]{36})$/i);
   if (match) {

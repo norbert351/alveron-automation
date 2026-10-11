@@ -35,6 +35,9 @@ export function classifyFailure(error: unknown): FailureCategory {
   if (code === 'RATE_LIMITED') return 'RATE_LIMITED';
   if (code === 'NETWORK_ERROR') return 'NETWORK_ERROR';
   if (code === 'INVALID_RESPONSE') return 'INVALID_RESPONSE';
+  // A not-yet-served finance contract is reported as an invalid/unavailable response, never as a
+  // transient API failure that retries forever.
+  if (code === 'FINANCE_ENDPOINT_UNAVAILABLE') return 'INVALID_RESPONSE';
   if (code === 'LEDGER_FAILURE') return 'LEDGER_ERROR';
   if (code === 'VALIDATION_FAILED') return 'VALIDATION_FAILED';
   if (httpStatus === 401) return 'AUTHENTICATION_ERROR';

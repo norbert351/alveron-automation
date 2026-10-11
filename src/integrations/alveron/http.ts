@@ -1,7 +1,8 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import type { Config } from './config.js';
-import { assertLoopbackBase } from './config.js';
 import { AppError } from './errors.js';
+import { FINANCE_EVENTS_PATH, FINANCE_READ_PATHS } from './finance.js';
+import { AUTOMATION_EVENTS_PATH } from './automation-events.js';
 import type { Logger } from './logger.js';
 
 export interface Timing { now(): number; sleep(ms: number): Promise<void>; }
@@ -40,6 +41,64 @@ const maxBodyBytes = 1024 * 1024;
 type AttemptResult = { ok: true; value: unknown } |
   { ok: false; error: AppError; retry: boolean; retryAfterMs: number };
 
+/**
+ * Exact-path allowlist entry for read endpoints that require numeric pagination.
+ * The base path must match exactly and every query value must be 1-4 digits, so no
+ * caller-supplied host, path, key or value can ever reach the outbound request.
+ */
+function isPagedRead(path: string, base: string, keys: readonly string[], maxDigits = 4): boolean {
+  const separator = path.indexOf('?');
+  if (separator === -1) return path === base;
+  if (path.slice(0, separator) !== base) return false;
+  const query = path.slice(separator + 1);
+  if (!query || query.length > 40) return false;
+  const pairs = query.split('&');
+  if (pairs.length > keys.length) return false;
+  return pairs.every(pair => {
+    const equals = pair.indexOf('=');
+    if (equals <= 0) return false;
+    const key = pair.slice(0, equals);
+    const value = pair.slice(equals + 1);
+    return keys.includes(key) && new RegExp(`^\\d{1,${maxDigits}}$`).test(value);
+  });
+}
+
+/**
+ * Outbox reads (finance + automation). The base path is exact; the only permitted query is a
+ * bounded `status=pending|delivered`, `page`, `pageSize` pagination triple. No caller value can
+ * introduce a host, path or arbitrary parameter.
+ */
+function isOutboxEventsRead(path: string, base: string): boolean {
+  const separator = path.indexOf('?');
+  if (separator === -1) return path === base;
+  if (path.slice(0, separator) !== base) return false;
+  const query = path.slice(separator + 1);
+  if (!query || query.length > 60) return false;
+  const pairs = query.split('&');
+  if (pairs.length > 3) return false;
+  const seen = new Set<string>();
+  return pairs.every(pair => {
+    const equals = pair.indexOf('=');
+    if (equals <= 0) return false;
+    const key = pair.slice(0, equals);
+    const value = pair.slice(equals + 1);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    if (key === 'status') return value === 'pending' || value === 'delivered';
+    if (key === 'page' || key === 'pageSize') return /^\d{1,4}$/.test(value);
+    return false;
+  });
+}
+
+/**
+ * The non-financial writes the transport permits: acknowledge a single outbox event by UUID. Each
+ * carries no body and can only flip that event's outbox row to `delivered` in Alveron.
+ */
+const FINANCE_EVENT_ACK_PATH =
+  /^\/admin\/finance\/events\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/ack$/i;
+const AUTOMATION_EVENT_ACK_PATH =
+  /^\/admin\/automation\/events\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/ack$/i;
+
 export class HttpTransport {
   private readonly baseUrl: string;
   constructor(
@@ -48,7 +107,7 @@ export class HttpTransport {
     private readonly fetchImpl: typeof fetch = fetch,
     private readonly scheduler: RequestScheduler = sharedScheduler,
   ) {
-    this.baseUrl = assertLoopbackBase(config.baseUrl);
+    this.baseUrl = config.baseUrl;
     if (!Number.isInteger(config.timeoutMs) || config.timeoutMs < 1 || config.timeoutMs > 120000 ||
         !Number.isInteger(config.maxRetries) || config.maxRetries < 0 || config.maxRetries > 3 ||
         !Number.isInteger(config.requestsPerMinute) || config.requestsPerMinute < 1 || config.requestsPerMinute > 40) {
@@ -58,10 +117,17 @@ export class HttpTransport {
 
   async request(method: 'GET' | 'POST', path: string, token?: string): Promise<unknown> {
     const login = method === 'POST' && path === '/auth/admin-login';
+    const ack = method === 'POST' && (FINANCE_EVENT_ACK_PATH.test(path) || AUTOMATION_EVENT_ACK_PATH.test(path));
     // Exact-match allowlist: no wildcards, no query strings, no caller-supplied URLs.
     const allowedGet = /^\/orders(?:\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/i.test(path)
-      || path === '/referrals/admin/stats'; // confirmed to invoke processPendingReferrals()
-    if (!login && !(method === 'GET' && allowedGet)) {
+      || isPagedRead(path, '/orders', ['limit', 'offset'], 6) // bounded order pagination only
+      || path === '/referrals/admin/stats' // confirmed to invoke processPendingReferrals()
+      || isPagedRead(path, '/products', ['limit', 'offset'])
+      || isPagedRead(path, '/admin/product-requests', ['page', 'pageSize'])
+      || isOutboxEventsRead(path, FINANCE_EVENTS_PATH) // bounded finance outbox pagination only
+      || isOutboxEventsRead(path, AUTOMATION_EVENTS_PATH) // bounded automation outbox pagination only
+      || FINANCE_READ_PATHS.includes(path); // exact, query-free finance reads only
+    if (!login && !ack && !(method === 'GET' && allowedGet)) {
       throw new AppError('VALIDATION_FAILED');
     }
     const attempts = login ? 1 : this.config.maxRetries + 1;
@@ -77,7 +143,7 @@ export class HttpTransport {
   }
 
   private async attempt(method: 'GET' | 'POST', path: string, token?: string): Promise<AttemptResult> {
-    const login = method === 'POST';
+    const login = method === 'POST' && path === '/auth/admin-login';
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     let response: Response | undefined;

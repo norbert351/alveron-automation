@@ -1,13 +1,40 @@
 {
   "name": "Alveron Automation — Error Classification (DEV)",
+  "id": "T0o2hhdklxob9bkX",
   "active": false,
-  "settings": { "executionOrder": "v1" },
+  "settings": { "executionOrder": "v1", "saveDataSuccessExecution": "none", "saveDataErrorExecution": "all" },
   "nodes": [
     { "id": "error", "name": "Error Trigger", "type": "n8n-nodes-base.errorTrigger", "typeVersion": 1, "position": [0,0], "parameters": {} },
     { "id": "classify", "name": "Sanitized Failure Classification", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [240,0], "parameters": {
-      "jsCode": "// Records a sanitized failure classification and stops. No automatic replay:\n// the gateway owns bounded retries, and replaying blindly could duplicate notifications.\nconst x = $input.first().json;\nconst text = String(x.execution?.error?.message || x.trigger?.error?.message || '');\n// Phase 4 canonical codes plus Phase 5 failure categories.\nconst signals = ['CONFIGURATION_ERROR','AUTHENTICATION_ERROR','AUTHORIZATION_ERROR','RATE_LIMITED','ALVERON_SERVER_ERROR','NETWORK_ERROR','INVALID_RESPONSE','VALIDATION_FAILED','LEDGER_ERROR','AUTHENTICATION_FAILED','ALVERON_API_FAILURE','CONFIG_INVALID','CUSTOMER_EMAIL_MISSING','NOTIFICATION_NOT_SENT','DELIVERY_RECONCILIATION_REQUIRED','LEDGER_FAILURE','GATEWAY_AUTHENTICATION_FAILED'];\nconst transient = ['RATE_LIMITED','ALVERON_SERVER_ERROR','NETWORK_ERROR'];\nconst matched = signals.filter(s => text.includes(s));\nreturn [{ json: { workflow: x.workflow?.name ?? 'unknown', failingNode: x.execution?.lastNodeExecuted ?? 'unknown', matchedSignals: matched, transient: matched.some(s => transient.includes(s)), manualInterventionRequired: true, automaticReplay: false } }];"
+      "jsCode": "const x = $input.first().json; const text = String(x.execution?.error?.message || x.trigger?.error?.message || ''); const marker = text.match(/(?:GATEWAY_RUN_FAILED|REFERRAL_QUALIFICATION_FAILED)\\|([A-Z_]+)\\|([A-Z_]+)\\|(true|false)/); const categories = ['CONFIGURATION_ERROR','AUTHENTICATION_ERROR','AUTHORIZATION_ERROR','RATE_LIMITED','ALVERON_SERVER_ERROR','NETWORK_ERROR','INVALID_RESPONSE','VALIDATION_FAILED','LEDGER_ERROR','UNKNOWN_ERROR']; let category = marker?.[2] ?? 'UNKNOWN_ERROR'; let errorCode = marker?.[1] ?? 'UNKNOWN_ERROR'; if (!categories.includes(category)) category = 'UNKNOWN_ERROR'; if (!/^[A-Z_]+$/.test(errorCode)) errorCode = category; if (/ECONNREFUSED|ENOTFOUND|ETIMEDOUT|socket hang up|fetch failed|network error/i.test(text)) { category = 'NETWORK_ERROR'; errorCode = 'GATEWAY_UNAVAILABLE'; } else if (/GATEWAY_AUTHENTICATION_FAILED|unauthorized/i.test(text)) { category = 'AUTHENTICATION_ERROR'; errorCode = 'GATEWAY_AUTHENTICATION_FAILED'; } else if (/CONFIG_INVALID|configuration/i.test(text)) { category = 'CONFIGURATION_ERROR'; errorCode = 'CONFIG_INVALID'; } const transient = marker?.[3] === 'true' || ['RATE_LIMITED','ALVERON_SERVER_ERROR','NETWORK_ERROR'].includes(category); const rawExecutionId = String(x.execution?.id ?? ''); const executionId = /^[A-Za-z0-9:_-]{1,200}$/.test(rawExecutionId) ? rawExecutionId : 'trigger-' + Date.now() + '-' + Math.random().toString(36).slice(2,12); const workflow = String(x.workflow?.name ?? '').trim() || 'Triggered workflow'; return [{ json: { workflow: workflow.slice(0,200), executionId, errorCode, category, transient, manualInterventionRequired: true, automaticReplay: false } }];"
+    } },
+    { "id": "notify", "name": "Request Telegram Admin Alert", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [480,0], "retryOnFail": false, "onError": "continueRegularOutput", "parameters": {
+      "method": "POST",
+      "url": "http://127.0.0.1:8787/internal/notifications/automation-error",
+      "authentication": "genericCredentialType",
+      "genericAuthType": "httpHeaderAuth",
+      "sendBody": true,
+      "specifyBody": "json",
+      "jsonBody": "={{ JSON.stringify({ workflow: $json.workflow, executionId: $json.executionId, errorCode: $json.errorCode, category: $json.category, transient: $json.transient }) }}",
+      "options": {
+        "timeout": 120000,
+        "response": {
+          "response": {
+            "fullResponse": true,
+            "neverError": true,
+            "responseFormat": "json"
+          }
+        }
+      }
+    } },
+    { "id": "result", "name": "Record Sanitized Delivery Result", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [720,0], "parameters": {
+      "jsCode": "const raw = $input.first().json; const body = raw.body && typeof raw.body === 'object' && !Array.isArray(raw.body) ? raw.body : raw; const gatewayStatus = Number(raw.statusCode || 200); const notificationStatus = typeof body?.adminNotificationStatus === 'string' ? body.adminNotificationStatus : 'UNKNOWN'; if (gatewayStatus !== 200 || !['SUCCESS','SKIPPED'].includes(notificationStatus)) console.warn(JSON.stringify({ status: 'telegram_admin_alert_not_delivered', gatewayStatus, notificationStatus })); return [{ json: { status: 'handled', automaticReplay: false } }];"
     } }
   ],
-  "connections": { "Error Trigger": { "main": [[{ "node": "Sanitized Failure Classification", "type": "main", "index": 0 }]] } },
+  "connections": {
+    "Error Trigger": { "main": [[{ "node": "Sanitized Failure Classification", "type": "main", "index": 0 }]] },
+    "Sanitized Failure Classification": { "main": [[{ "node": "Request Telegram Admin Alert", "type": "main", "index": 0 }]] },
+    "Request Telegram Admin Alert": { "main": [[{ "node": "Record Sanitized Delivery Result", "type": "main", "index": 0 }]] }
+  },
   "pinData": {}
 }

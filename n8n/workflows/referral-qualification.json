@@ -1,7 +1,9 @@
 {
   "name": "Referral Qualification — Scheduled Alveron Trigger (DEV)",
+  "id": "pv0qOsI6igcTg1iA",
   "active": false,
   "settings": {
+    "errorWorkflow": "T0o2hhdklxob9bkX",
     "executionOrder": "v1",
     "saveDataSuccessExecution": "none",
     "saveDataErrorExecution": "all"
@@ -39,7 +41,7 @@
       "retryOnFail": false,
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.GATEWAY_BASE_URL + '/internal/workflows/referral-qualification/run' }}",
+        "url": "http://127.0.0.1:8787/internal/workflows/referral-qualification/run",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
@@ -48,9 +50,11 @@
         "options": {
           "timeout": 120000,
           "response": {
-            "fullResponse": true,
-            "neverError": true,
-            "responseFormat": "json"
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
           }
         }
       }
@@ -65,7 +69,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "// 'duplicate' is a legitimate no-op for an already-handled window, not a failure.\nconst r = $input.first().json;\nconst b = r.body;\nconst categories = ['CONFIGURATION_ERROR','AUTHENTICATION_ERROR','AUTHORIZATION_ERROR','RATE_LIMITED','ALVERON_SERVER_ERROR','NETWORK_ERROR','INVALID_RESPONSE','VALIDATION_FAILED','LEDGER_ERROR','UNKNOWN_ERROR'];\nif (r.statusCode === 200 && b && (b.status === 'completed' || b.status === 'duplicate')) {\n  return [{ json: { status: b.status, windowId: b.windowId, sideEffectInvoked: b.sideEffectInvoked === true, processedCount: b.processedCount ?? null, duplicate: b.duplicate ?? null } }];\n}\nconst category = categories.includes(b?.failureCategory) ? b.failureCategory : 'UNKNOWN_ERROR';\nthrow new Error('REFERRAL_QUALIFICATION_FAILED:' + category);"
+        "jsCode": "const raw = $input.first().json; const b = raw.body && typeof raw.body === 'object' && !Array.isArray(raw.body) ? raw.body : raw; const categories = ['CONFIGURATION_ERROR','AUTHENTICATION_ERROR','AUTHORIZATION_ERROR','RATE_LIMITED','ALVERON_SERVER_ERROR','NETWORK_ERROR','INVALID_RESPONSE','VALIDATION_FAILED','LEDGER_ERROR','UNKNOWN_ERROR']; if (b && (b.status === 'completed' || b.status === 'duplicate')) { return [{ json: { status: b.status, windowId: b.windowId, sideEffectInvoked: b.sideEffectInvoked === true, processedCount: b.processedCount ?? null, duplicate: b.duplicate ?? null } }]; } const category = categories.includes(b?.failureCategory) ? b.failureCategory : 'UNKNOWN_ERROR'; const transient = ['RATE_LIMITED','ALVERON_SERVER_ERROR','NETWORK_ERROR'].includes(category); throw new Error('REFERRAL_QUALIFICATION_FAILED|' + category + '|' + category + '|' + transient);"
       }
     }
   ],

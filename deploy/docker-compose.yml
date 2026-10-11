@@ -1,38 +1,71 @@
-# Operator deployment for self-hosted n8n — pinned stable version.
-# Secrets come from deploy/.env (git-ignored). Never commit real values.
-# The automation gateway does NOT run in this compose stack: it stays a private
-# host process (loopback), reachable only by n8n.
+# Alveron n8n deployment — pinned stable n8n + PostgreSQL, host-only listeners.
+#
+# Architecture (single VPS):
+#   nginx (host)            TLS termination for n8n.alveronfashion.com -> 127.0.0.1:5678
+#   n8n (Docker)            network_mode: host, binds only 127.0.0.1:5678 so it can reach the
+#                           host-private automation gateway at 127.0.0.1:8787 (systemd service)
+#   postgres (Docker)       n8n database in an isolated bridge network, published ONLY on the
+#                           host loopback as 127.0.0.1:5432:5432 (never reachable from the Internet)
+#
+# Secrets come from deploy/.env (git-ignored, chmod 600). Never commit real values.
+# n8n version is pinned: never use latest/next/beta/nightly.
+name: alveron-n8n
+
 services:
+  postgres:
+    image: postgres:18
+    container_name: alveron-n8n-postgres
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in deploy/.env}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in deploy/.env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
+      PGDATA: /var/lib/postgresql/data
+    volumes:
+      - n8n_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
   n8n:
     image: n8nio/n8n:2.39.8
     container_name: alveron-n8n
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:5678:5678"   # Nginx (on the host) terminates TLS for n8n.alveronfashion.com
+    network_mode: host
     env_file:
       - .env
     environment:
-      # Set in deploy/.env — never committed. Must stay stable across restarts.
-      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
-      - N8N_HOST=${N8N_HOST}
-      - N8N_PROTOCOL=${N8N_PROTOCOL}
-      - WEBHOOK_URL=${WEBHOOK_URL}
-      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
-      - TZ=${TZ}
-      # Non-secret hardening
-      - N8N_DIAGNOSTICS_ENABLED=false
-      - N8N_TEMPLATES_ENABLED=false
-      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false   # workflows use $env.GATEWAY_BASE_URL (non-secret)
-      - EXECUTIONS_DATA_PRUNE=true
-      - EXECUTIONS_DATA_MAX_AGE=336
-      - EXECUTIONS_DATA_PRUNE_MAX_COUNT=5000
+      N8N_LISTEN_ADDRESS: 127.0.0.1
+      N8N_PROXY_HOPS: 1
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: 127.0.0.1
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB}
+      DB_POSTGRESDB_USER: ${POSTGRES_USER}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_TEMPLATES_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "true"
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "true"
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: "24"
+      EXECUTIONS_DATA_PRUNE_MAX_COUNT: "5000"
     volumes:
-      - n8n_data:/home/node/.n8n   # workflows, credentials, execution history, settings
+      - n8n_storage:/home/node/.n8n
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:5678/healthz"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5678/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 5
 
 volumes:
-  n8n_data:
+  n8n_storage:
+  n8n_postgres_data:

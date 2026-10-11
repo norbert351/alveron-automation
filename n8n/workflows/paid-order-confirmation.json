@@ -1,7 +1,9 @@
 {
   "name": "Paid Order — Customer Confirmation & Admin Alert (DEV)",
+  "id": "rrDo0wfidjXGRUHG",
   "active": false,
   "settings": {
+    "errorWorkflow": "T0o2hhdklxob9bkX",
     "executionOrder": "v1",
     "saveDataSuccessExecution": "none",
     "saveDataErrorExecution": "all"
@@ -39,7 +41,7 @@
       "retryOnFail": false,
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.GATEWAY_BASE_URL + '/internal/workflows/paid-order-confirmation/run' }}",
+        "url": "http://127.0.0.1:8787/internal/workflows/paid-order-confirmation/run",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
@@ -48,9 +50,11 @@
         "options": {
           "timeout": 120000,
           "response": {
-            "fullResponse": true,
-            "neverError": true,
-            "responseFormat": "json"
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
           }
         }
       }
@@ -65,7 +69,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "const r = $input.first().json; const b = r.body; const allowed = ['AUTHENTICATION_FAILED','ALVERON_API_FAILURE','RATE_LIMITED','VALIDATION_FAILED','CUSTOMER_EMAIL_MISSING','NOTIFICATION_NOT_SENT','DELIVERY_RECONCILIATION_REQUIRED','LEDGER_FAILURE','INTERNAL_ERROR']; if (r.statusCode !== 200 || !b || b.status !== 'completed' || b.failed !== 0) { const reasons = Array.isArray(b?.results) ? b.results.map(x => x.reason) : [b?.code]; const safe = [...new Set(reasons.filter(x => allowed.includes(x)))]; throw new Error('GATEWAY_RUN_FAILED:' + (safe.join(',') || 'GATEWAY_UNAVAILABLE')); } if (typeof b.runId !== 'string' || !Number.isInteger(b.processed)) throw new Error('GATEWAY_RUN_FAILED:VALIDATION_FAILED'); return [{json:{runId:b.runId,status:b.status,processed:b.processed,skipped:b.skipped,failed:b.failed}}];"
+        "jsCode": "const raw = $input.first().json; const b = raw.body && typeof raw.body === 'object' && !Array.isArray(raw.body) ? raw.body : raw; const codes = ['AUTHENTICATION_FAILED','ALVERON_API_FAILURE','RATE_LIMITED','VALIDATION_FAILED','CUSTOMER_EMAIL_MISSING','NOTIFICATION_NOT_SENT','DELIVERY_RECONCILIATION_REQUIRED','LEDGER_FAILURE','INTERNAL_ERROR','GATEWAY_AUTHENTICATION_FAILED','GATEWAY_UNAVAILABLE']; const categories = ['CONFIGURATION_ERROR','AUTHENTICATION_ERROR','AUTHORIZATION_ERROR','RATE_LIMITED','ALVERON_SERVER_ERROR','NETWORK_ERROR','INVALID_RESPONSE','VALIDATION_FAILED','LEDGER_ERROR','UNKNOWN_ERROR']; const httpStatus = Number(raw.statusCode || 0); if (!b || b.status !== 'completed' || b.failed !== 0) { const reasons = Array.isArray(b?.results) ? b.results.map(x => x.reason) : [b?.code]; const safeCodes = [...new Set(reasons.filter(x => codes.includes(x)))]; const code = codes.includes(b?.code) ? b.code : (httpStatus === 401 ? 'GATEWAY_AUTHENTICATION_FAILED' : (httpStatus === 429 ? 'RATE_LIMITED' : (safeCodes[0] || 'GATEWAY_UNAVAILABLE'))); const category = categories.includes(b?.failureCategory) ? b.failureCategory : (httpStatus === 401 ? 'AUTHENTICATION_ERROR' : (httpStatus === 429 ? 'RATE_LIMITED' : (httpStatus >= 500 || httpStatus === 0 ? 'NETWORK_ERROR' : 'UNKNOWN_ERROR'))); const transient = b?.transient === true || ['RATE_LIMITED','ALVERON_SERVER_ERROR','NETWORK_ERROR'].includes(category); throw new Error('GATEWAY_RUN_FAILED|' + code + '|' + category + '|' + transient); } if (typeof b.runId !== 'string' || !Number.isInteger(b.processed)) throw new Error('GATEWAY_RUN_FAILED|VALIDATION_FAILED|VALIDATION_FAILED|false'); return [{json:{runId:b.runId,status:b.status,processed:b.processed,skipped:b.skipped,failed:b.failed}}];"
       }
     }
   ],

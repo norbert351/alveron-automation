@@ -4,6 +4,12 @@ import type { FailureCategory } from '../integrations/alveron/errors.js';
 import type { ReferralStats } from '../integrations/alveron/schemas.js';
 import type { Ledger } from '../ledger/sqlite-ledger.js';
 import { computeReferralWindow } from '../services/referral-qualification-window.js';
+import {
+  disabledAdminNotifier,
+  referralProcessingNotification,
+  type AdminNotificationResult,
+  type AdminNotifier,
+} from '../providers/admin/index.js';
 import { ReferralRunner, type ReferralDuplicateReason } from './referral-runner.js';
 
 /** The only Alveron endpoint this workflow calls. Confirmed to invoke processPendingReferrals(). */
@@ -27,6 +33,7 @@ export interface ReferralQualificationResult {
   failureCategory?: FailureCategory;
   code?: string;
   ledgerRecorded?: boolean;
+  adminNotificationStatus?: AdminNotificationResult['status'];
   message: string;
 }
 
@@ -40,6 +47,7 @@ export class ReferralQualificationWorkflow {
     private readonly ledger: Ledger,
     private readonly windowMinutes: number,
     private readonly now: () => number = Date.now,
+    private readonly adminNotifications: AdminNotifier = disabledAdminNotifier,
   ) {}
 
   async run(): Promise<ReferralQualificationResult> {
@@ -56,8 +64,15 @@ export class ReferralQualificationWorkflow {
       durationMs: Math.max(0, completedAtMs - startedAtMs), processedCount: null as null,
     };
     if (outcome.status === 'completed') {
+      let adminNotificationStatus: AdminNotificationResult['status'] = 'DISABLED';
+      try {
+        adminNotificationStatus = (await this.adminNotifications.notify(
+          referralProcessingNotification(window.windowId, outcome.stats))).status;
+      } catch {
+        adminNotificationStatus = 'FAILED';
+      }
       return { ...base, status: 'completed', httpSucceeded: true, sideEffectInvoked: true,
-        observations: outcome.stats,
+        observations: outcome.stats, adminNotificationStatus,
         message: 'Alveron referral processing invoked; the endpoint reports no processed count.' };
     }
     if (outcome.status === 'duplicate') {

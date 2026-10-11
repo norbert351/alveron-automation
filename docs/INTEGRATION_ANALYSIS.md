@@ -1029,8 +1029,8 @@ Created as `'PENDING'` (011) while the default is `'pending'` (009); success is 
 ### 16.5 Payments search by email appears broken
 `getAllOrders` search interpolates `${order.email}` — but `orders` has **no `email` column** (it is `customer_email`, plus `shipping_address.full_name/phone`). Verified: email-based search likely never matches. Do not rely on `GET /orders?search=<email>`; filter locally instead.
 
-### 16.6 UNKNOWN — variant coverage of `GET /products`
-Whether the public product list includes full variant/stock data was not verified in this pass. Low-stock automation (which needs `product_variants.stock` per variant) therefore has **unverified feasibility**; it may require per-product detail calls, multiplying request cost.
+### 16.6 RESOLVED — variant coverage of `GET /products`
+**Resolved by read-only probe against the live API during the Telegram integration pass.** `GET /products?limit=N&offset=M` returns `{ items, total }`; each item carries `low_stock_alert`, `track_inventory` and a `variants[]` array whose entries include `stock`, `color`, `size`, `sku` and `available`. The list endpoint therefore does include the per-variant stock needed for low-stock detection, so **no per-product detail calls are required** and the feared request-cost multiplication does not occur. Gap N4 is closed and a low-stock alert workflow is implemented. Caveat: a product whose `track_inventory` is false, or whose `low_stock_alert` is null, has no meaningful threshold and is skipped; and per `INTEGRATION_ANALYSIS.md` §8.5 the two coexisting inventory paths mean this is *alerting only* — the automation never reconciles or writes stock.
 
 ### 16.7 UNKNOWN — environment and deployment facts
 To confirm before any production use: the real public API hostname; whether a reverse proxy preserves `rawBody` for the Paystack webhook; whether `NODE_ENV=production` (activates webhook IP allow-listing); whether `PAYSTACK_SECRET_KEY`/`RESEND_API_KEY`/`APP_URL` are set in production; whether anything external already triggers `processPendingReferrals`.
@@ -1228,7 +1228,7 @@ alveron-automation/
 | N1 | Production API hostname/TLS; whether a reverse proxy preserves `rawBody`; the `NODE_ENV` value (G-10, §16.7) |
 | N2 | Whether `PAYSTACK_SECRET_KEY`, `RESEND_API_KEY`, `APP_URL` are set in production (§16.7) |
 | N3 | Whether anything external already calls `processPendingReferrals` (§16.7) — affects the referral workflow's cadence |
-| N4 | Confirmation of `GET /products` variant coverage for any future low-stock workflow (§16.6) |
+| N4 | ~~Confirmation of `GET /products` variant coverage for any future low-stock workflow (§16.6)~~ — **RESOLVED**: list endpoint returns `variants[].stock` plus product `low_stock_alert`/`track_inventory`; low-stock alerting implemented |
 | N5 | n8n deployment details: host (`n8n.alveronfashion.com`?), Docker, Postgres, Redis/queue need, and a backup of `N8N_ENCRYPTION_KEY` (§3.2). **The production VPS will not be touched from this repository** |
 | N6 | Whether gaps G-1 … G-4 will be raised with the Alveron team now — they are written to be handed over as-is (§13) |
 

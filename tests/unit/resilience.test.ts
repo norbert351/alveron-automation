@@ -19,13 +19,33 @@ function transport(handler: typeof fetch, retries = 2, timeout = 100) {
 const session = () => Response.json({ session: { access_token: 'synthetic-token', expires_in: 60 },
   employee: { status: 'active', role: { slug: 'admin' } }, profile: { role: 'admin' } });
 
-test('config accepts exact required names and rejects missing values, writes, production and nonlocal URLs', () => {
+test('config accepts exact required names and rejects missing values, writes and insecure/nonlocal URLs', () => {
   assert.ok(config.ledgerPath.endsWith('synthetic.sqlite'));
   for (const name of Object.keys(env)) assert.throws(() => loadConfig({ ...env, [name]: '' }));
-  for (const extra of [{ FEATURE_ENABLE_ALVERON_WRITES: 'true' }, { NODE_ENV: 'production' },
-    { GATEWAY_API_KEY: 'short' }, { ALVERON_API_BASE_URL: 'https://example.invalid/api' }]) {
+  for (const extra of [{ FEATURE_ENABLE_ALVERON_WRITES: 'true' },
+    { GATEWAY_API_KEY: 'short' },
+    { ALVERON_API_BASE_URL: 'https://example.invalid/api' },
+    { ALVERON_API_BASE_URL: 'http://example.invalid/api', ALVERON_ALLOW_REMOTE_API: 'true' },
+    { ALVERON_API_BASE_URL: 'https://example.invalid/app' }]) {
     assert.throws(() => loadConfig({ ...env, ...extra }));
   }
+});
+
+test('config allows production mode, but only a loopback or explicitly opted-in HTTPS API URL', () => {
+  // NODE_ENV=production alone is permitted (production deployment mode).
+  assert.ok(loadConfig({ ...env, NODE_ENV: 'production' }));
+  assert.throws(() => loadConfig({ ...env, NODE_ENV: 'production', EMAIL_PROVIDER: 'console' }));
+  // A remote HTTPS URL requires the explicit opt-in, in production too.
+  assert.throws(() => loadConfig({ ...env, NODE_ENV: 'production', ALVERON_API_BASE_URL: 'https://api.example.invalid/api' }));
+  const remote = loadConfig({ ...env, NODE_ENV: 'production', ALVERON_API_BASE_URL: 'https://api.example.invalid/api', ALVERON_ALLOW_REMOTE_API: 'true' });
+  assert.equal(remote.baseUrl, 'https://api.example.invalid/api');
+  // The gateway itself stays loopback-only even with a remote API URL.
+  for (const gatewayHost of ['0.0.0.0', '::', '192.168.1.10', 'example.invalid']) {
+    assert.throws(() => loadConfig({ ...env, ...(gatewayHost ? { GATEWAY_HOST: gatewayHost } : {}) }));
+  }
+  // Writes remain refuse in production even with remote access allowed.
+  assert.throws(() => loadConfig({ ...env, NODE_ENV: 'production', ALVERON_ALLOW_REMOTE_API: 'true',
+    ALVERON_API_BASE_URL: 'https://api.example.invalid/api', FEATURE_ENABLE_ALVERON_WRITES: 'true' }));
 });
 
 test('auth success is single-flight, reuses token, and reauthenticates after expiry', async () => {

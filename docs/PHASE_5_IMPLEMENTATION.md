@@ -1,5 +1,8 @@
 # Phase 5 implementation status — SCHEDULED REFERRAL QUALIFICATION
 
+> Historical Phase 5 snapshot. For current Telegram/error-workflow behavior and deployment gates, use
+> `n8n/README.md` and `deploy/OPERATOR_RUNBOOK.md`.
+
 **Date:** 2026-09-16 · Phase 4 remains intact; this phase extends it. Alveron is still the source of truth.
 Labels: **CONFIRMED** (verified in Alveron source / executed here), **PROPOSED**, **UNKNOWN**.
 
@@ -107,15 +110,16 @@ The result distinguishes **what is actually known**:
 
 `n8n/workflows/referral-qualification.json` — inactive, credential-free:
 Schedule (1 hour default) → HTTP Request (gateway key via **Header Auth credential**, `retryOnFail:false`) →
-Code validation accepting `completed` **and** `duplicate`, otherwise throwing `REFERRAL_QUALIFICATION_FAILED:<category>`.
+Code validation accepting `completed` **and** `duplicate`, otherwise throwing a structured
+`REFERRAL_QUALIFICATION_FAILED|code|category|transient` marker.
 
-The Phase 4 `error-handler.json` is **reused**; its classifier now recognises both Phase 4 codes and Phase 5
-categories, flags `transient`, and always sets `manualReplay:false` (no automatic replay; the gateway owns retries).
+The shared `error-handler.json` recognises the structured marker, prevents automatic replay, and sends a
+best-effort sanitized Telegram alert through the private gateway. Its notification request cannot recurse
+through the Error Trigger.
 
-**Correction carried in this phase:** the Phase 4 HTTP Request node had one redundant `response` nesting level
-(`options.response.response`), which was wrong for HTTP Request v4.2. Both workflows now use
-`options.response = { fullResponse, neverError, responseFormat }`. n8n runtime behaviour is still **NOT verified**
-(no n8n instance on this machine).
+The current HTTP Request v4.2 export retains the official nested `options.response.response` shape with
+`fullResponse`, `neverError`, and `responseFormat`. Workflow JSON and embedded Code-node syntax are tested, but
+real n8n import/execution remains operator-verified rather than claimed here.
 
 ## 10. Files created / changed
 

@@ -87,23 +87,22 @@ The API is deployed at `/var/www/alveron`, fronted by **nginx 1.24.0 (Ubuntu)** 
 | **Alveron API supervision** | **UNKNOWN** (no deploy artifacts in the repo). Confirm what supervises `apps/api` (`start:prod` = `node dist/main`) so gateway restarts are independent of API restarts. |
 | **Paystack raw-body preservation** | relevant to Alveron's webhook, not the automation — **UNKNOWN** whether the production nginx preserves the raw body; flag for the Alveron owners. |
 
-## 6. Exactly what must change in the automation repository (security-relevant — approval required)
+## 6. Implemented repository-side production guard
 
-`src/integrations/alveron/config.ts` currently **refuses any non-loopback `ALVERON_API_BASE_URL`**
-(`assertLoopbackBase` allows only `localhost`/`127.0.0.1`/`[::1]`), and `loadConfig` refuses `NODE_ENV=production`.
-That guard was the deliberate Phase 4/5 dev-safety decision and must not be silently weakened.
+`src/integrations/alveron/config.ts` now keeps loopback as the default and accepts a remote base URL only when
+both conditions hold:
 
-**PROPOSED change (not implemented):**
+- the scheme is `https://` (plain-HTTP remote URLs are refused), and
+- `ALVERON_ALLOW_REMOTE_API=true` is explicitly set.
 
-1. Keep loopback-only as the default.
-2. Allow a remote base URL **only** when **both** hold:
-   - the scheme is **`https://`** (never plain-HTTP remote), and
-   - an explicit opt-in env var is set, e.g. `ALVERON_ALLOW_REMOTE_API=true`.
-3. Production remains gated by an explicit `NODE_ENV=production` allowance, with `FEATURE_ENABLE_ALVERON_WRITES` still forced to `false` in every mode.
-4. Add unit tests: remote **http** URL still refused; remote **https** refused without the opt-in; allowed with it; writes still refused.
-5. Record the superseding decision in `docs/PHASE_4_IMPLEMENTATION.md` and the runbook.
+`NODE_ENV=production` is accepted, but production mode rejects the simulated console email provider. The client
+still exposes only the allow-listed read endpoints plus the login POST, and `FEATURE_ENABLE_ALVERON_WRITES` must
+remain `false` in every mode. Unit tests cover remote HTTP rejection, HTTPS without opt-in, HTTPS with opt-in,
+production mode, and write refusal.
 
-**Why this is safe:** the four called endpoints are read-only (plus the login POST); the gateway alone holds the service-account credential; n8n still receives only the gateway key; the write capability remains absent.
+**Current operator boundary:** remote HTTPS support does not by itself authorize or complete a production launch.
+The service account, VPS checks, real email adapter, n8n credential binding, controlled tests, and explicit
+operator approval remain required.
 
 ## 7. Operator checklist to connect the gateway to the live API
 
@@ -112,7 +111,7 @@ That guard was the deliberate Phase 4/5 dev-safety decision and must not be sile
 [ ] 2. Confirm how apps/api is supervised (pm2/systemd)   [ ] so gateway restarts are independent
 [ ] 3. Create the dedicated service account               [ ] profiles.role='admin' + active employee (slug 'admin')
 [ ] 4. Sign in once manually with that account            [ ] clears mustChangePassword
-[ ] 5. Approve + implement the §6 config change           [ ] with the listed unit tests
+[ ] 5. Review the implemented §6 config guard            [ ] remote HTTPS still requires explicit opt-in
 [ ] 6. Deploy the automation repo to the VPS              [ ] /opt/alveron-automation, build dist/
 [ ] 7. Create deploy/gateway.env (mode 600)               [ ] ALVERON_API_BASE_URL=https://api.alveronfashion.com/api
                                                           [ ] ALVERON_ALLOW_REMOTE_API=true
@@ -120,7 +119,8 @@ That guard was the deliberate Phase 4/5 dev-safety decision and must not be sile
                                                           [ ] ADMIN_ALERT_EMAIL, LEDGER_DATABASE_URL,
                                                           [ ] EMAIL_PROVIDER=unknown, FEATURE_ENABLE_ALVERON_WRITES=false
 [ ] 8. systemd: enable alveron-gateway                    [ ] systemctl status alveron-gateway
-[ ] 9. npm run verify:env && npm run check:connectivity   [ ] must show a successful admin login + authorized read
+[ ] 9. npm run build; then run `node --env-file=deploy/gateway.env dist/scripts/verify-env.js`
+[ ]    and `node --env-file=deploy/gateway.env dist/scripts/check-alveron-connectivity.js` (successful admin login + authorized read)
 [ ] 10. n8n: DNS + TLS for n8n.alveronfashion.com         [ ] compose up, import 3 workflows, Header Auth credential,
                                                           [ ] bind error workflow, keep everything INACTIVE
 [ ] 11. Live referral test data (dev-like) approved       [ ] or keep the referral workflow inactive
@@ -147,5 +147,5 @@ That guard was the deliberate Phase 4/5 dev-safety decision and must not be sile
 | Permissions required | `@Roles('admin')` **and** `profiles.role='admin'` (service-level re-checks) — no Supabase service-role key, no Paystack secret, no DB credential |
 | Endpoints required | `POST /auth/admin-login`, `GET /orders`, `GET /orders/:id`, `GET /referrals/admin/stats` — all CONFIRMED live; admin reads correctly 401 unauthenticated |
 | VPS configuration required | gateway as a private loopback systemd service on the API host (Node ≥ 22.5 — **must be verified**), n8n behind nginx with a new DNS record + TLS, firewall unchanged, ledger path + backups, automation repo cloned/built to `/opt/alveron-automation` |
-| Repository-side change | one security-reviewed opt-in to allow `https://` remote base URLs (§6) — approval required |
-| Status | **BLOCKED** on: service account, VPS Node version check, §6 approval, n8n runtime, live referral test data |
+| Repository-side change | HTTPS remote opt-in is implemented and unit-tested (§6); operator launch approval and remaining deployment prerequisites are still required |
+| Status | **BLOCKED** on: service account, VPS Node version check, real email adapter, n8n runtime/credential binding, and approved live test data |

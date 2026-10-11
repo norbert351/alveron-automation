@@ -1,0 +1,101 @@
+{
+  "name": "Low Stock — Catalog Threshold Alert (DEV)",
+  "id": "4SXdOd3apxUgMOJM",
+  "active": false,
+  "settings": {
+    "errorWorkflow": "T0o2hhdklxob9bkX",
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "all"
+  },
+  "nodes": [
+    {
+      "id": "schedule",
+      "name": "Conservative Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "gateway",
+      "name": "Run Private Gateway",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        0
+      ],
+      "retryOnFail": false,
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8787/internal/workflows/low-stock-notification/run",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "result",
+      "name": "Validate Sanitized Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const raw = $input.first().json; const b = raw.body && typeof raw.body === 'object' && !Array.isArray(raw.body) ? raw.body : raw; const codes = ['AUTHENTICATION_FAILED','ALVERON_API_FAILURE','RATE_LIMITED','VALIDATION_FAILED','AUTHORIZATION_ERROR','INVALID_RESPONSE','BUSY']; const categories = ['AUTHENTICATION_ERROR','AUTHORIZATION_ERROR','RATE_LIMITED','ALVERON_SERVER_ERROR','NETWORK_ERROR','INVALID_RESPONSE','VALIDATION_FAILED']; const httpStatus = Number(raw.statusCode || 0); if (httpStatus !== 200 || b?.status !== 'completed') { const code = codes.includes(b?.code) ? b.code : (httpStatus === 401 ? 'GATEWAY_AUTHENTICATION_FAILED' : (httpStatus === 429 ? 'RATE_LIMITED' : (httpStatus === 403 ? 'AUTHORIZATION_ERROR' : 'GATEWAY_UNAVAILABLE'))); const category = categories.includes(b?.failureCategory) ? b.failureCategory : (httpStatus === 401 ? 'AUTHENTICATION_ERROR' : (httpStatus === 403 ? 'AUTHORIZATION_ERROR' : (httpStatus === 429 ? 'RATE_LIMITED' : (httpStatus >= 500 || httpStatus === 0 ? 'NETWORK_ERROR' : 'UNKNOWN_ERROR')))); const transient = b?.transient === true || ['RATE_LIMITED','ALVERON_SERVER_ERROR','NETWORK_ERROR'].includes(category); throw new Error('GATEWAY_RUN_FAILED|' + code + '|' + category + '|' + transient); } if (typeof b.runId !== 'string' || !Number.isInteger(b.notified) || !Number.isInteger(b.belowThreshold)) throw new Error('GATEWAY_RUN_FAILED|VALIDATION_FAILED|VALIDATION_FAILED|false'); return [{json:{runId:b.runId,status:b.status,productsScanned:b.productsScanned,belowThreshold:b.belowThreshold,notified:b.notified,duplicates:b.duplicates,suppressedByCap:b.suppressedByCap}}];"
+      }
+    }
+  ],
+  "connections": {
+    "Conservative Schedule": {
+      "main": [
+        [
+          {
+            "node": "Run Private Gateway",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Private Gateway": {
+      "main": [
+        [
+          {
+            "node": "Validate Sanitized Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}

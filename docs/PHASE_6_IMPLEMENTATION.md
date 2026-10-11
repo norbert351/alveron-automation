@@ -1,5 +1,8 @@
 # Phase 6 implementation status — self-hosted n8n runtime + dev integration verification
 
+> Historical Phase 6 snapshot. Current routes, Telegram delivery, credential loading, and deployment gates are
+> documented in the root README, `n8n/README.md`, and `deploy/OPERATOR_RUNBOOK.md`.
+
 **Date:** 2026-09-20 · Phase 4/5 implementation unchanged (49 tests still green). **No production deployment.**
 Labels: **CONFIRMED** (executed here) · **MOCK** (verified against the local mock Alveron, *not* live) · **NOT RUN** · **BLOCKED**.
 
