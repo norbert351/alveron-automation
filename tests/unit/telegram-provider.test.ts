@@ -5,13 +5,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from '../../src/integrations/alveron/config.js';
 import { createLogger } from '../../src/integrations/alveron/logger.js';
-import { parseOrder, parseReferralStats } from '../../src/integrations/alveron/schemas.js';
+import { parseOrder } from '../../src/integrations/alveron/schemas.js';
 import { AppError } from '../../src/integrations/alveron/errors.js';
 import { SqliteLedger, type Ledger } from '../../src/ledger/sqlite-ledger.js';
 import { NotificationNotSent } from '../../src/providers/notification-delivery.js';
 import {
   paidOrderNotification,
-  referralProcessingNotification,
+  referralRewardNotification,
   renderTelegramHtml,
   type AdminNotificationProvider,
 } from '../../src/providers/admin/index.js';
@@ -103,10 +103,11 @@ test('rapid Telegram messages to one admin chat are serialized at the official o
   }, measuredTiming);
   await Promise.all([
     provider.send(paidOrderNotification(order), 'first'),
-    provider.send(referralProcessingNotification('2026-09-25T10:00Z', parseReferralStats({
-      total: 4, pending: 1, qualified: 1, rewarded: 1, cancelled: 1, totalDiscounts: 2000,
-      totalRewards: 1000, totalCreditIssued: 1000, totalCreditRedeemed: 0, conversionRate: 50,
-    })), 'second'),
+    provider.send(referralRewardNotification({
+      reference: 'reward-batch:1-2', newlyRewarded: 1, rewardAmount: null,
+      rewardedTotal: 2, qualifiedTotal: 0,
+      observedAt: '2026-09-25T10:00:00.000Z',
+    }), 'second'),
   ]);
   assert.deepEqual(starts, [0, 1100]);
 });

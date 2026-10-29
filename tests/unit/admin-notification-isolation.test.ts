@@ -102,9 +102,17 @@ test('referral side-effect success stays successful when Telegram delivery is un
       send: async () => { throw new Error('synthetic ambiguous failure'); },
     };
     const notifications = new AdminNotificationService(ledger, provider, createLogger('silent'));
+    let clock = Date.parse('2026-09-25T10:00:00Z');
+    const rewardedStats = { ...stats, rewarded: stats.rewarded + 1, totalRewards: stats.totalRewards + 1000 };
+    let current = stats;
     const workflow = new ReferralQualificationWorkflow(
-      { triggerReferralProcessing: async () => stats }, ledger, 60, () => Date.parse('2026-09-25T10:00:00Z'), notifications,
+      { triggerReferralProcessing: async () => current }, ledger, 60, () => clock, notifications,
     );
+    const baseline = await workflow.run();
+    assert.equal(baseline.status, 'completed');
+    assert.equal(baseline.adminNotificationStatus, undefined, 'a new baseline sends nothing');
+    clock += 60 * 60 * 1000;
+    current = rewardedStats;
     const first = await workflow.run();
     const second = await workflow.run();
     assert.equal(first.status, 'completed');
@@ -112,5 +120,34 @@ test('referral side-effect success stays successful when Telegram delivery is un
     assert.equal(first.adminNotificationStatus, 'PENDING');
     assert.equal(second.status, 'duplicate');
     assert.equal(second.adminNotificationStatus, undefined);
+  } finally { ledger.close(); }
+});
+
+test('a reward alert is delivered once and quiet hourly runs send nothing through the real notification service', async () => {
+  const ledger = new SqliteLedger(':memory:');
+  try {
+    let sends = 0;
+    const provider: AdminNotificationProvider = {
+      namespace: 'telegram', enabled: true,
+      send: async () => { sends++; return { messageId: 'synthetic', simulated: true }; },
+    };
+    const notifications = new AdminNotificationService(ledger, provider, createLogger('silent'));
+    let clock = Date.parse('2026-09-25T10:00:00Z');
+    let current = stats;
+    const workflow = new ReferralQualificationWorkflow(
+      { triggerReferralProcessing: async () => current }, ledger, 60, () => clock, notifications,
+    );
+    await workflow.run();
+    assert.equal(sends, 0, 'baseline sends nothing');
+    clock += 60 * 60 * 1000;
+    current = { ...stats, rewarded: stats.rewarded + 1, totalRewards: stats.totalRewards + 1000 };
+    await workflow.run();
+    assert.equal(sends, 1, 'one genuine reward produces exactly one Telegram send');
+    clock += 60 * 60 * 1000;
+    await workflow.run();
+    assert.equal(sends, 1, 'the next quiet hour produces none');
+    clock += 60 * 60 * 1000;
+    await workflow.run();
+    assert.equal(sends, 1);
   } finally { ledger.close(); }
 });

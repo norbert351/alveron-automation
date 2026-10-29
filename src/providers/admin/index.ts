@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { AppError } from '../../integrations/alveron/errors.js';
-import type { Order, ReferralStats } from '../../integrations/alveron/schemas.js';
+import type { Order } from '../../integrations/alveron/schemas.js';
 import type { ProductRequest } from '../../integrations/alveron/product-requests.js';
 import type {
   FinanceCapital, FinanceDailyReport, FinanceExpense, FinanceMetrics, FinancePayable, FinancePeriod,
@@ -14,7 +14,8 @@ export type AdminNotificationKind =
   | 'PAYMENT_RECONCILIATION'
   | 'ORDER_STATUS'
   | 'SHIPPING_SLA'
-  | 'REFERRAL_PROCESSING'
+  | 'REFERRAL_REWARD'
+  | 'REFERRAL_REWARD_ISSUE'
   | 'AUTOMATION_ERROR'
   | 'PRODUCT_REQUEST'
   | 'PRODUCT_REQUEST_STATUS'
@@ -224,14 +225,102 @@ export function paymentFailureNotification(order: Order): AdminNotification {
     ]);
 }
 
-export function referralProcessingNotification(windowId: string, stats: ReferralStats): AdminNotification {
-  return createNotification('REFERRAL_PROCESSING', `referral:${windowId}`, windowId, 'INFO',
-    '🎁 REFERRAL PROCESSING TRIGGERED', [
-      { label: 'Window', value: windowId },
-      { label: 'Side effect', value: 'Alveron referral processing invoked' },
-      { label: 'Current qualified total', value: String(stats.qualified) },
-      { label: 'Current rewarded total', value: String(stats.rewarded) },
-    ], 'Alveron does not report how many individual referrals changed in this run.');
+export interface ReferralRewardInput {
+  /** Safe, aggregate reference derived from Alveron's reward counters (no customer identifiers). */
+  reference: string;
+  newlyRewarded: number;
+  /** Alveron's aggregate stats do not attribute an amount to this specific reward event. */
+  rewardAmount: number | null;
+  rewardedTotal: number;
+  qualifiedTotal: number;
+  observedAt: string;
+}
+
+/**
+ * A referral reward increase that Alveron has already recorded. Alveron's admin stats expose only
+ * aggregates, so the reference is a safe reward-batch identifier rather than a customer reference.
+ * The event key is derived from the cumulative rewarded count, which the durable notification
+ * ledger uses to suppress a repeat alert for the same observed reward state across restarts.
+ */
+export function referralRewardNotification(input: ReferralRewardInput): AdminNotification {
+  if (!Number.isSafeInteger(input.newlyRewarded) || input.newlyRewarded < 1 ||
+      (input.rewardAmount !== null &&
+        (!Number.isSafeInteger(input.rewardAmount) || input.rewardAmount < 0)) ||
+      !Number.isSafeInteger(input.rewardedTotal) || input.rewardedTotal < 0 ||
+      !Number.isSafeInteger(input.qualifiedTotal) || input.qualifiedTotal < 0) fail();
+  const observed = text(input.observedAt, 40);
+  if (!Number.isFinite(Date.parse(observed))) fail();
+  return createNotification('REFERRAL_REWARD',
+    `referral-reward:${input.rewardedTotal}`, text(input.reference, 200), 'INFO',
+    '🎁 REFERRAL REWARD ISSUED', [
+      { label: 'Reference', value: text(input.reference, 200) },
+      { label: 'Newly rewarded', value: String(input.newlyRewarded) },
+      { label: 'Reward amount', value: input.rewardAmount === null ? 'not reported (Alveron aggregate stats)' : naira(input.rewardAmount) },
+      { label: 'Rewarded total', value: String(input.rewardedTotal) },
+      { label: 'Qualified total', value: String(input.qualifiedTotal) },
+      { label: 'Processing result', value: 'Reward recorded by Alveron' },
+      { label: 'Observed at', value: observed },
+    ], 'Alveron reports aggregate referral totals only; individual referral identifiers, customer identifiers and per-reward amounts are not exposed. This alert is deduplicated per observed reward state.');
+}
+
+export interface ReferralRewardIssueInput {
+  reference: string;
+  newlyQualified: number;
+  newlyRewarded: number;
+  rewardedTotal: number;
+  qualifiedTotal: number;
+  observedAt: string;
+}
+
+/**
+ * A qualification increase without a corresponding reward increase. This is deliberately a
+ * warning, not a success: Alveron has not reported that credit was recorded, so the operator must
+ * investigate before assuming a reward exists.
+ */
+export function referralRewardIssueNotification(input: ReferralRewardIssueInput): AdminNotification {
+  if (!Number.isSafeInteger(input.newlyQualified) || input.newlyQualified < 1 ||
+      !Number.isSafeInteger(input.newlyRewarded) || input.newlyRewarded < 0 ||
+      !Number.isSafeInteger(input.rewardedTotal) || input.rewardedTotal < 0 ||
+      !Number.isSafeInteger(input.qualifiedTotal) || input.qualifiedTotal < 0) fail();
+  const observed = text(input.observedAt, 40);
+  if (!Number.isFinite(Date.parse(observed))) fail();
+  return createNotification('REFERRAL_REWARD_ISSUE',
+    `referral-reward-issue:${input.qualifiedTotal}:${input.rewardedTotal}`, text(input.reference, 200), 'WARNING',
+    '⚠️ REFERRAL REWARD NOT RECORDED', [
+      { label: 'Reference', value: text(input.reference, 200) },
+      { label: 'Newly qualified', value: String(input.newlyQualified) },
+      { label: 'Newly rewarded', value: String(input.newlyRewarded) },
+      { label: 'Qualified total', value: String(input.qualifiedTotal) },
+      { label: 'Rewarded total', value: String(input.rewardedTotal) },
+      { label: 'Processing result', value: 'Qualification observed without a reward increase' },
+      { label: 'Observed at', value: observed },
+    ], 'Alveron reported more qualified referrals without a corresponding reward increase. Investigate in Alveron Admin before assuming a reward was issued.');
+}
+
+export interface ReferralProcessingFailureInput {
+  windowId: string;
+  category: string;
+  code: string;
+  observedAt: string;
+}
+
+/**
+ * A scheduled referral-processing attempt that exhausted its retries. Definite transport failures
+ * are still reported by the n8n error workflow; this covers the exhausted `duplicate` outcome,
+ * which the scheduler would otherwise treat as a successful no-op.
+ */
+export function referralProcessingFailureNotification(input: ReferralProcessingFailureInput): AdminNotification {
+  const observed = text(input.observedAt, 40);
+  if (!Number.isFinite(Date.parse(observed))) fail();
+  return createNotification('AUTOMATION_ERROR',
+    `referral-processing-failure:${text(input.windowId, 80)}:${text(input.code, 80)}`,
+    text(input.windowId, 80), 'ERROR', '🚨 REFERRAL PROCESSING FAILED', [
+      { label: 'Window', value: text(input.windowId, 80) },
+      { label: 'Category', value: text(input.category, 80) },
+      { label: 'Error', value: text(input.code, 80) },
+      { label: 'Result', value: 'Retries exhausted; no success is claimed' },
+      { label: 'Observed at', value: observed },
+    ], 'Retries are exhausted for this window. Inspect the gateway ledger and Alveron health before the next scheduled run.');
 }
 
 export function automationErrorNotification(

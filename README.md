@@ -264,6 +264,10 @@ did not import, execute, or activate any workflow in the real n8n instance.
 - The referral workflow calls `GET /referrals/admin/stats`, which invokes Alveron's own
   `processPendingReferrals()` for **all** pending referrals; it reports no processed count, so the automation
   never claims one.
+- Referral reward alerts are event-based, not run-based: the workflow persists the last observed aggregate
+  stats (in the existing SQLite state table) and sends a Telegram alert only when the `rewarded` count
+  increases. Hourly runs with no new reward send nothing. Alveron exposes aggregates only, so the alert uses a
+  safe reward-batch reference and marks the per-reward amount as not reported rather than guessing it.
 - No referral automation beyond triggering Alveron's own logic (no eligibility/reward/credit rules here).
 - **Blocked by the Alveron API (no placeholder workflows created):** referral customer notifications (no
   per-referral events), abandoned-cart reminders (no safe cart identity/consent/inactivity API), customer
